@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Fotobox Admin</title>
+    <style>
+        body { font-family: sans-serif; max-width: 500px; margin: 40px auto; padding: 20px; background: #f0f2f5; color: #333; }
+        h1 { border-bottom: 2px solid #333; padding-bottom: 10px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        input, select { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { background: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; width: 100%; font-size: 16px; }
+        button:hover { background: #0056b3; }
+        #msg { margin-top: 15px; font-weight: bold; text-align: center; color: green; }
+    </style>
+</head>
+<body>
+    <h1>Fotobox Einstellungen</h1>
+    <form id="configForm">
+        <div class="form-group">
+            <label>Countdown Zeit (Gesamtdauer in Sek.):</label>
+            <input type="number" name="countdown_time" value="{{ config.countdown_time }}" min="1" max="10">
+        </div>
+        <div class="form-group">
+            <label>Cheese Text:</label>
+            <input type="text" name="cheese_text" value="{{ config.cheese_text }}">
+        </div>
+        <div class="form-group">
+            <label>Pre-Trigger Zeit (Klack-Vorlauf in Sek.):</label>
+            <input type="number" name="pre_trigger_time" value="{{ config.pre_trigger_time }}" step="0.1" min="0.5" max="3">
+        </div>
+        <div class="form-group">
+            <label>Anzeigedauer Foto (Sekunden):</label>
+            <input type="number" name="show_photo_time" value="{{ config.show_photo_time }}" min="2" max="20">
+        </div>
+        <div class="form-group">
+            <label>Diashow Reihenfolge:</label>
+            <select name="diashow_order">
+                <option value="random" {% if config.diashow_order == 'random' %}selected{% endif %}>Zufällig</option>
+                <option value="chronological" {% if config.diashow_order == 'chronological' %}selected{% endif %}>Chronologisch</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Diashow Bilddauer (Sekunden):</label>
+            <input type="number" name="diashow_duration" value="{{ config.diashow_duration }}" min="2" max="30">
+        </div>
+        <button type="submit">Einstellungen speichern</button>
+    </form>
+    <div id="msg"></div>
+    <script>
+        document.getElementById('configForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            fetch('/save_settings', { method: 'POST', body: new FormData(this) })
+            .then(res => res.json()).then(data => {
+                if(data.status === 'success') {
+                    document.getElementById('msg').innerText = "Erfolgreich gespeichert!";
+                    setTimeout(() => { document.getElementById('msg').innerText = ""; }, 3000);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

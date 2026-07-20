@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Fotobox Diashow</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: black; overflow: hidden; }
+        .slide { position: absolute; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 1s ease-in-out; }
+        .active { opacity: 1; }
+    </style>
+</head>
+<body>
+    <div id="diashow-container"></div>
+    <script>
+        let fotos = [];
+        let currentIndex = 0;
+        let slideTimer = null;
+        function loadSlides() {
+            fetch('/api/fotos').then(res => res.json()).then(data => {
+                if (data.fotos.length === 0) return;
+                fotos = data.fotos;
+                let durationMs = data.duration * 1000;
+                const container = document.getElementById('diashow-container');
+                container.innerHTML = '';
+                fotos.forEach((foto, index) => {
+                    const img = document.createElement('img');
+                    img.src = '/get_photo/' + foto;
+                    img.className = 'slide';
+                    if (index === 0) img.className = 'slide active';
+                    container.appendChild(img);
+                });
+                currentIndex = 0;
+                if (slideTimer) clearInterval(slideTimer);
+                slideTimer = setInterval(nextSlide, durationMs);
+            });
+        }
+        function nextSlide() {
+            const slides = document.querySelectorAll('.slide');
+            if (slides.length <= 1) return;
+            slides[currentIndex].classList.remove('active');
+            currentIndex = (currentIndex + 1) % slides.length;
+            slides[currentIndex].classList.add('active');
+            if (currentIndex === 0) loadSlides();
+        }
+        loadSlides();
+    </script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+# Technische Produktdokumentation: DIY-Fotobox-System
+
+Diese Dokumentation enthält alle technischen Spezifikationen, Installationsanweisungen sowie Funktionsbeschreibungen für die Inbetriebnahme und den Betrieb des Fotobox-Systems.
+
+---
+
+## 1. Systemübersicht & Lieferumfang
+
+Das System basiert auf einer modularen Softwarearchitektur, die für Einplatinencomputer (Raspberry Pi ab Modell 4) unter Debian-basierten Betriebssystemen optimiert ist. Es stellt eine lokale Webanwendung zur automatisierten Steuerung digitaler Spiegelreflexkameras (DSLR) bereit.
+
+Unterstützte Schnittstellen:
+
+* Kamera-Protokoll: PTP/MTP via USB (gphoto2)
+
+
+* Hardware-Eingang: GPIO-Schnittstelle für mechanische Taster
+
+
+* Netzwerk-Schnittstelle: HTTP-REST-API für Fernsteuerung
+
+---
+
+## 2. Installationsanleitung
+
+Systemvoraussetzungen:
+
+* Hardware: Raspberry Pi 4 oder neuer, USB-Verbindung zur Kamera
+* Betriebssystem: Raspberry Pi OS (Debian 13 "Trixie" oder neuer)
+
+
+* Netzwerk: Internetverbindung während der Erstinstallation erforderlich
+
+
+
+Installationsprozedur:
+
+1. Navigieren Sie im Terminal in das Projektverzeichnis:
+cd ~/fotobox_v2
+2. Führen Sie das Installationsskript mit Administrationsrechten aus:
+./install.sh
+3. Das Skript führt automatisiert folgende Schritte durch:
+* Aktualisierung der Paketquellen und Installation der C-Bibliotheken (swig, liblgpio-dev).
+
+
+* Installation der Systemwerkzeuge gphoto2 und ffmpeg.
+
+
+* Einrichtung einer isolierten virtuellen Python-Umgebung (venv).
+
+
+* Installation der Python-Pakete (Flask, Pillow, gpiozero, rpi-lgpio).
+
+
+
+
+4. Autostart-Option: Bei Abfrage der systemd-Einrichtung bewirkt die Bestätigung mit "j" eine automatische Registrierung des Dienstes fotobox.service, der bei jedem Systemstart im Hintergrund geladen wird.
+
+
+
+Hinweis: Falls kein Autostart eingerichtet wurde, kann das System über ./start_fotobox.sh manuell initialisiert werden.
+
+---
+
+## 3. Benutzeroberflächen und Netzwerk-Endpunkte
+
+Nach dem Systemstart ist die Fotobox standardmäßig über den Port 5000 erreichbar (http://<IP-Adresse-des-Geräts>:5000).
+
+### 3.1 Kiosk-Oberfläche (/)
+
+* Zweck: Primäre Benutzeroberfläche für Endnutzer.
+* Funktion: Visualisierung eines softwarebasierten Auslösemechanismus. Nach Aktivierung wird ein definierter Countdown (3, 2, 1) gestartet, gefolgt vom Kamera-Auslösebefehl und einer anschließenden temporären Bildvorschau auf dem Monitor.
+
+### 3.2 Administrator-Konsole (/admin)
+
+* Zweck: Zentrale Konfiguration und Einstellungsverwaltung des Fotobox-Systems.
+* Funktion:
+* Konfigurations-Management: Dynamisches Auslesen und Anzeigen der aktuellen Systemeinstellungen direkt aus der Konfigurationsdatei (config.json).
+* Echtzeit-Anpassung: Live-Änderung von Betriebsparametern über die Benutzeroberfläche, darunter die Anpassung der Countdown-Dauer, die Konfiguration von Text-Overlays auf den Bildern sowie die Verwaltung der Diashow-Präferenzen.
+* Einstellungs-Speicherung: Automatisierte Übermittlung modifizierter Parameter via POST-Request an den Endpunkt /save_settings, welcher die Konfiguration persistent auf dem Datenträger sichert und die Änderungen im laufenden Betrieb der Anwendung ohne Neustart übernimmt.
+
+
+
+### 3.3 Medien-Galerie (/galerie)
+
+* Zweck: Bildbetrachtung für Endnutzer.
+* Funktion: Dynamische Darstellung aller im Verzeichnis /fotos` gespeicherten Aufnahmen in einer responsiven Raster-Ansicht inklusive einer Vollbild-Detailansicht bei Auswahl.
+
+### 3.4 Automatisierte Diashow (/diashow)
+
+* Zweck: Wiedergabe der Aufnahmen auf Sekundärmedien (z. B. Beamer).
+* Funktion: Kontinuierliche, automatisierte Schleifenwiedergabe des gesamten Bildbestands. Neu generierte Aufnahmen werden durch einen File-Watcher priorisiert erfasst und unmittelbar als nächstes Element in den Anzeigezyklus eingereiht.
+
+---
+
+## 4. Hardware- und Softwareschnittstellen zur Auslösung
+
+Das System verarbeitet Auslöseimpulse über drei voneinander unabhängige Kanäle:
+
+### 4.1 Digitale HTTP-Schnittstelle (/trigger)
+
+Ein HTTP-GET-Aufruf an den Endpunkt /trigger initiiert softwareseitig exakt dieselbe Countdown- und Aufnahmesequenz wie die Kiosk-Oberfläche. Dies erlaubt die Integration externer Netzwerkgeräte (z. B. Smartphones, WLAN-Taster oder ESP32-Module) zur drahtlosen Fernsteuerung.
+
+### 4.2 Physische GPIO-Schnittstelle (Hardware-Taster)
+
+Für die Anbindung eines mechanischen Drucktasters ist die GPIO-Leiste des Raspberry Pi direkt vorkonfiguriert. Die Signalverarbeitung erfolgt über die Bibliothek gpiozero mit integrierter Software-Entprellung.
+
+Anschlussbelegung:
+
+* Pin 9: GND (Massepotenzial)
+* Pin 11: GPIO 17 (Signaleingang)
+
+Tabelle der Anschlussbelegung:
+Pin 9   | Funktion: GND     | Beschreibung: Massebezug für den Tasterstromkreis.
+Pin 11  | Funktion: GPIO 17 | Beschreibung: Signalleitung. Ein Schließen des Kontakts gegen GND löst die Sequenz aus.
+
+---
+
+## 5. Dateistruktur und Datensicherung
+
+Die Speicherung der Daten erfolgt lokal im Installationsverzeichnis der Fotobox:
+
+* /fotos: Enthält alle generierten JPEG-Aufnahmen in Originalauflösung.
+* /templates: Beinhaltet die HTML-Strukturen der Web-Endpunkte.
+
+Zur Datensicherung können die Bilddateien im laufenden Betrieb direkt aus dem Ordner /fotos via SFTP/SSH kopiert oder über ein Netzlaufwerk gesichert werden.
