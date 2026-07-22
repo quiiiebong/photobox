@@ -59,5 +59,83 @@
             });
         });
     </script>
+<hr>
+<h3>🛠️ Diagnose & Fehlerbehebung</h3>
+
+<div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+    <h4>Kamera-Status</h4>
+    <p>
+        <strong>Status:</strong> 
+        <span id="cam-status-badge" style="padding: 5px 10px; border-radius: 3px; background-color: #ffc107; color: #000;">
+            Wird geprüft...
+        </span>
+    </p>
+    <p id="cam-details" style="color: #6c757d;">Frage gphoto2 ab...</p>
+    
+    <button onclick="checkCameraStatus()" style="padding: 8px 15px; margin-right: 10px;">🔄 Status aktualisieren</button>
+    <button onclick="resetCamera()" style="padding: 8px 15px; background-color: #dc3545; color: white; border: none; border-radius: 3px;">
+        ⚠️ gphoto2 Reset (Prozesse killen)
+    </button>
+</div>
+
+<script>
+// Funktion zum Abfragen des Status
+function checkCameraStatus() {
+    const badge = document.getElementById('cam-status-badge');
+    const details = document.getElementById('cam-details');
+    
+    badge.style.backgroundColor = '#ffc107';
+    badge.style.color = '#000';
+    badge.innerText = 'Wird geprüft...';
+    details.innerText = 'Bitte warten...';
+
+    fetch('/api/camera_status')
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'connected') {
+                badge.style.backgroundColor = '#28a745';
+                badge.style.color = '#fff';
+                badge.innerText = 'Verbunden';
+            } else if (data.status === 'disconnected') {
+                badge.style.backgroundColor = '#6c757d';
+                badge.style.color = '#fff';
+                badge.innerText = 'Nicht verbunden';
+            } else {
+                badge.style.backgroundColor = '#dc3545';
+                badge.style.color = '#fff';
+                badge.innerText = 'Fehler / Hängt';
+            }
+            details.innerText = data.details;
+        })
+        .catch(error => {
+            badge.style.backgroundColor = '#dc3545';
+            badge.innerText = 'Netzwerkfehler';
+            details.innerText = error;
+        });
+}
+
+// Funktion zum Zurücksetzen (Prozesse killen)
+function resetCamera() {
+    if(!confirm("Möchtest du wirklich alle gphoto2 Prozesse beenden? Dies löst Blockaden, bricht aber eventuell laufende Übertragungen ab.")) {
+        return;
+    }
+    
+    fetch('/api/camera_reset', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            alert(data.message);
+            // Nach dem Reset direkt den Status neu prüfen
+            setTimeout(checkCameraStatus, 1000);
+        })
+        .catch(error => {
+            alert('Fehler beim Reset: ' + error);
+        });
+}
+
+// Beim Laden der Seite sofort den Status prüfen
+document.addEventListener("DOMContentLoaded", function() {
+    checkCameraStatus();
+});
+</script>
 </body>
 </html>
