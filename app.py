@@ -269,3 +269,42 @@ def api_fotos():
 if __name__ == '__main__':
     start_stream()
     app.run(host='0.0.0.0', port=5000, threaded=True, debug=False)
+
+@app.route('/api/camera_status')
+def camera_status():
+    """Prüft, ob eine Kamera via gphoto2 verbunden ist."""
+    try:
+        # Führt gphoto2 --auto-detect aus und wartet maximal 5 Sekunden
+        result = subprocess.run(
+            ['gphoto2', '--auto-detect'], 
+            capture_output=True, 
+            text=True, 
+            timeout=5
+        )
+        output = result.stdout.strip()
+        
+        # Die Ausgabe von --auto-detect hat 2 Kopfzeilen. 
+        # Wenn mehr Zeilen existieren, ist eine Kamera gelistet.
+        lines = output.split('\n')
+        if len(lines) > 2 and lines[2].strip() != '':
+            # Extrahiert den Namen der erkannten Kamera (erste Spalte der 3. Zeile)
+            camera_name = lines[2].split('   ')[0].strip()
+            return jsonify({"status": "connected", "details": f"Verbunden: {camera_name}"})
+        else:
+            return jsonify({"status": "disconnected", "details": "Keine Kamera gefunden."})
+            
+    except subprocess.TimeoutExpired:
+        # Sehr wichtig: Wenn gphoto2 hängt, fangen wir das hier ab!
+        return jsonify({"status": "error", "details": "gphoto2 reagiert nicht (Prozess hängt). Bitte Reset durchführen."})
+    except Exception as e:
+        return jsonify({"status": "error", "details": f"Systemfehler: {str(e)}"})
+
+@app.route('/api/camera_reset', methods=['POST'])
+def camera_reset():
+    """Beendet alle hängenden gphoto2 Prozesse brutal (kill)."""
+    try:
+        # pkill sucht nach allen Prozessen, die 'gphoto2' heißen und beendet sie
+        subprocess.run(['pkill', '-9', '-f', 'gphoto2'], capture_output=True)
+        return jsonify({"status": "success", "message": "Alle gphoto2-Prozesse wurden erfolgreich beendet. Kamera sollte wieder reagieren."})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Fehler beim Beenden: {str(e)}"})
