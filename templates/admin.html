@@ -11,11 +11,29 @@
         input, select { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
         button { background: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; width: 100%; font-size: 16px; }
         button:hover { background: #0056b3; }
+        .admin-card { background: white; padding: 15px; border-radius: 6px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .btn-sec { background: #6c757d; margin-top: 8px; }
+        .btn-sec:hover { background: #5a6268; }
+        .btn-danger { background: #dc3545; margin-top: 8px; }
+        .btn-danger:hover { background: #bd2130; }
+        .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; color: white; }
+        .status-online { background: #28a745; }
+        .status-offline { background: #dc3545; }
         #msg { margin-top: 15px; font-weight: bold; text-align: center; color: green; }
     </style>
 </head>
 <body>
     <h1>Fotobox Einstellungen</h1>
+    
+    <div class="admin-card">
+        <h3>Kamera & System Diagnostics</h3>
+        <p><strong>Status gphoto2:</strong> <span id="camStatus" class="status-badge status-offline">Prüfe...</span></p>
+        <p id="camDetails" style="font-size: 0.9em; color: #666;"></p>
+        <button type="button" class="btn-sec" onclick="callApi('/api/restart_stream')">Stream neu starten</button>
+        <button type="button" class="btn-sec" onclick="callApi('/api/restart_gphoto')">gphoto2 / Kamera Reset (Kamera löst aus)</button>
+        <button type="button" class="btn-danger" onclick="callApi('/api/restart_app')">Fotobox App neu starten</button>
+    </div>
+
     <form id="configForm">
         <div class="form-group">
             <label>Countdown Zeit (Gesamtdauer in Sek.):</label>
@@ -47,7 +65,30 @@
         <button type="submit">Einstellungen speichern</button>
     </form>
     <div id="msg"></div>
+
     <script>
+        function checkCamera() {
+            fetch('/api/camera_status')
+            .then(res => res.json())
+            .then(data => {
+                const badge = document.getElementById('camStatus');
+                badge.className = 'status-badge ' + (data.connected ? 'status-online' : 'status-offline');
+                badge.innerText = data.connected ? 'Verbunden' : 'Nicht verbunden';
+                document.getElementById('camDetails').innerText = data.details;
+            }).catch(() => {
+                document.getElementById('camStatus').innerText = 'Fehler';
+            });
+        }
+
+        function callApi(url) {
+            fetch(url, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => { alert(data.message); setTimeout(checkCamera, 1500); });
+        }
+
+        checkCamera();
+        setInterval(checkCamera, 10000);
+
         document.getElementById('configForm').addEventListener('submit', function(e) {
             e.preventDefault();
             fetch('/save_settings', { method: 'POST', body: new FormData(this) })
@@ -59,83 +100,5 @@
             });
         });
     </script>
-<hr>
-<h3>🛠️ Diagnose & Fehlerbehebung</h3>
-
-<div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-    <h4>Kamera-Status</h4>
-    <p>
-        <strong>Status:</strong> 
-        <span id="cam-status-badge" style="padding: 5px 10px; border-radius: 3px; background-color: #ffc107; color: #000;">
-            Wird geprüft...
-        </span>
-    </p>
-    <p id="cam-details" style="color: #6c757d;">Frage gphoto2 ab...</p>
-    
-    <button onclick="checkCameraStatus()" style="padding: 8px 15px; margin-right: 10px;">🔄 Status aktualisieren</button>
-    <button onclick="resetCamera()" style="padding: 8px 15px; background-color: #dc3545; color: white; border: none; border-radius: 3px;">
-        ⚠️ gphoto2 Reset (Prozesse killen)
-    </button>
-</div>
-
-<script>
-// Funktion zum Abfragen des Status
-function checkCameraStatus() {
-    const badge = document.getElementById('cam-status-badge');
-    const details = document.getElementById('cam-details');
-    
-    badge.style.backgroundColor = '#ffc107';
-    badge.style.color = '#000';
-    badge.innerText = 'Wird geprüft...';
-    details.innerText = 'Bitte warten...';
-
-    fetch('/api/camera_status')
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'connected') {
-                badge.style.backgroundColor = '#28a745';
-                badge.style.color = '#fff';
-                badge.innerText = 'Verbunden';
-            } else if (data.status === 'disconnected') {
-                badge.style.backgroundColor = '#6c757d';
-                badge.style.color = '#fff';
-                badge.innerText = 'Nicht verbunden';
-            } else {
-                badge.style.backgroundColor = '#dc3545';
-                badge.style.color = '#fff';
-                badge.innerText = 'Fehler / Hängt';
-            }
-            details.innerText = data.details;
-        })
-        .catch(error => {
-            badge.style.backgroundColor = '#dc3545';
-            badge.innerText = 'Netzwerkfehler';
-            details.innerText = error;
-        });
-}
-
-// Funktion zum Zurücksetzen (Prozesse killen)
-function resetCamera() {
-    if(!confirm("Möchtest du wirklich alle gphoto2 Prozesse beenden? Dies löst Blockaden, bricht aber eventuell laufende Übertragungen ab.")) {
-        return;
-    }
-    
-    fetch('/api/camera_reset', { method: 'POST' })
-        .then(response => response.json())
-        .then(data => {
-            alert(data.message);
-            // Nach dem Reset direkt den Status neu prüfen
-            setTimeout(checkCameraStatus, 1000);
-        })
-        .catch(error => {
-            alert('Fehler beim Reset: ' + error);
-        });
-}
-
-// Beim Laden der Seite sofort den Status prüfen
-document.addEventListener("DOMContentLoaded", function() {
-    checkCameraStatus();
-});
-</script>
 </body>
 </html>
