@@ -43,6 +43,7 @@ config = load_config()
 stream_process = None
 keep_streaming = False
 current_frame = b""
+last_frame_time = 0
 lock = threading.Lock()
 
 overlay_text = ""
@@ -74,7 +75,7 @@ except Exception as e:
     print(f"Hardware-Buzzer nicht initialisiert (läuft dieses Skript auf einem Raspberry Pi?): {e}")
 
 def stream_worker():
-    global current_frame, keep_streaming, stream_process
+    global current_frame, keep_streaming, stream_process, last_frame_time
     cmd = ["gphoto2", "--capture-movie", "--stdout"]
     ffmpeg_cmd = ["ffmpeg", "-i", "pipe:0", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]
     try:
@@ -94,8 +95,11 @@ def stream_worker():
                 bytes_data = bytes_data[b+2:]
                 with lock:
                     current_frame = jpg_data
+                    last_frame_time = time.time()
     except Exception:
         pass
+    finally:
+        stop_stream()
 
 def start_stream():
     global keep_streaming, stream_thread
@@ -109,12 +113,54 @@ def stop_stream():
     keep_streaming = False
     if stream_process:
         gphoto, ffmpeg = stream_process
-        gphoto.kill()
-        ffmpeg.kill()
+        try:
+            gphoto.kill()
+            ffmpeg.kill()
+        except Exception:
+            pass
         stream_process = None
     with lock:
         current_frame = b""
     time.sleep(0.4)
+
+def wake_up_camera_via_trigger():
+    """Führt eine Blind-Auslösung durch, um verklemmte Kamera-Firmware zurückzusetzen."""
+    print("[Kamera-Reset] Sende Reset-Trigger an die Kamera...")
+    stop_stream()
+    subprocess.run(["pkill", "-9", "gphoto2"], stderr=subprocess.DEVNULL)
+    subprocess.run(["pkill", "-9", "ffmpeg"], stderr=subprocess.DEVNULL)
+    time.sleep(0.5)
+
+    cmd_dummy = ["gphoto2", "--capture-image"]
+    try:
+        subprocess.run(cmd_dummy, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        print("[Kamera-Reset] Reset-Trigger erfolgreich gesendet.")
+    except Exception as e:
+        print(f"[Kamera-Reset] Trigger-Timeout oder Fehler: {e}")
+    time.sleep(1.0)
+
+def restart_stream_internal(force_firmware_trigger=False):
+    stop_stream()
+    if force_firmware_trigger:
+        wake_up_camera_via_trigger()
+    time.sleep(0.5)
+    start_stream()
+
+def watchdog_worker():
+    global keep_streaming, is_capturing, last_frame_time
+    while True:
+        time.sleep(4)
+        if keep_streaming and not is_capturing:
+            now = time.time()
+            if last_frame_time > 0 and (now - last_frame_time > 5.0):
+                print("[Watchdog] Stream hängt! Versuch 1: Soft-Restart...")
+                restart_stream_internal(force_firmware_trigger=False)
+                
+                time.sleep(5)
+                if keep_streaming and not is_capturing and (time.time() - last_frame_time > 5.0):
+                    print("[Watchdog] Stream immer noch tot! Versuch 2: Triggere Kamera-Auslösung zum Reset...")
+                    restart_stream_internal(force_firmware_trigger=True)
+                    time.sleep(8)
 
 def draw_center_text(draw, img_width, img_height, text, font, fill_color, y_offset=0):
     left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
@@ -168,7 +214,7 @@ def gen_frames():
                 pass
 
 def capture_sequence_worker():
-    global is_capturing, overlay_text, overlay_subtitle, show_photo_path, config
+    global is_capturing, overlay_text, overlay_subtitle, show_photo_path, config, last_frame_time
     is_capturing = True
     show_photo_path = None
     countdown = float(config["countdown_time"])
@@ -202,7 +248,14 @@ def capture_sequence_worker():
     
     show_photo_path = None
     is_capturing = False
+    
     start_stream()
+    
+    # Prüfen, ob der Stream nach dem Bild wieder Daten sendet
+    time.sleep(2.5)
+    if time.time() - last_frame_time > 3.0:
+        print("[Capture Worker] Stream nach Foto blockiert. Führe erzwungenen Kamera-Reset aus...")
+        restart_stream_internal(force_firmware_trigger=True)
 
 @app.route('/')
 def index():
@@ -246,6 +299,35 @@ def save_settings():
     save_config(config)
     return jsonify({"status": "success"})
 
+@app.route('/api/camera_status')
+def camera_status():
+    try:
+        res = subprocess.run(["gphoto2", "--auto-detect"], capture_output=True, text=True)
+        lines = [line.strip() for line in res.stdout.strip().split('\n') if line.strip()]
+        connected = len(lines) > 2
+        details = lines[-1] if connected else "Keine Kamera erkannt"
+        return jsonify({"connected": connected, "details": details})
+    except Exception as e:
+        return jsonify({"connected": False, "details": str(e)})
+
+@app.route('/api/restart_stream', methods=['POST'])
+def api_restart_stream():
+    restart_stream_internal(force_firmware_trigger=False)
+    return jsonify({"status": "success", "message": "Stream wurde neu gestartet"})
+
+@app.route('/api/restart_gphoto', methods=['POST'])
+def api_restart_gphoto():
+    threading.Thread(target=restart_stream_internal, kwargs={"force_firmware_trigger": True}, daemon=True).start()
+    return jsonify({"status": "success", "message": "Reset-Auslösung gesendet & Stream wird neu gestartet!"})
+
+@app.route('/api/restart_app', methods=['POST'])
+def api_restart_app():
+    def delayed_exit():
+        time.sleep(1)
+        os._exit(0)
+    threading.Thread(target=delayed_exit, daemon=True).start()
+    return jsonify({"status": "success", "message": "App wird neu gestartet..."})
+
 @app.route('/get_photo/<filename>')
 def get_photo(filename):
     return send_from_directory(SAVE_DIR, filename)
@@ -268,43 +350,5 @@ def api_fotos():
 
 if __name__ == '__main__':
     start_stream()
+    threading.Thread(target=watchdog_worker, daemon=True).start()
     app.run(host='0.0.0.0', port=5000, threaded=True, debug=False)
-
-@app.route('/api/camera_status')
-def camera_status():
-    """Prüft, ob eine Kamera via gphoto2 verbunden ist."""
-    try:
-        # Führt gphoto2 --auto-detect aus und wartet maximal 5 Sekunden
-        result = subprocess.run(
-            ['gphoto2', '--auto-detect'], 
-            capture_output=True, 
-            text=True, 
-            timeout=5
-        )
-        output = result.stdout.strip()
-        
-        # Die Ausgabe von --auto-detect hat 2 Kopfzeilen. 
-        # Wenn mehr Zeilen existieren, ist eine Kamera gelistet.
-        lines = output.split('\n')
-        if len(lines) > 2 and lines[2].strip() != '':
-            # Extrahiert den Namen der erkannten Kamera (erste Spalte der 3. Zeile)
-            camera_name = lines[2].split('   ')[0].strip()
-            return jsonify({"status": "connected", "details": f"Verbunden: {camera_name}"})
-        else:
-            return jsonify({"status": "disconnected", "details": "Keine Kamera gefunden."})
-            
-    except subprocess.TimeoutExpired:
-        # Sehr wichtig: Wenn gphoto2 hängt, fangen wir das hier ab!
-        return jsonify({"status": "error", "details": "gphoto2 reagiert nicht (Prozess hängt). Bitte Reset durchführen."})
-    except Exception as e:
-        return jsonify({"status": "error", "details": f"Systemfehler: {str(e)}"})
-
-@app.route('/api/camera_reset', methods=['POST'])
-def camera_reset():
-    """Beendet alle hängenden gphoto2 Prozesse brutal (kill)."""
-    try:
-        # pkill sucht nach allen Prozessen, die 'gphoto2' heißen und beendet sie
-        subprocess.run(['pkill', '-9', '-f', 'gphoto2'], capture_output=True)
-        return jsonify({"status": "success", "message": "Alle gphoto2-Prozesse wurden erfolgreich beendet. Kamera sollte wieder reagieren."})
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"Fehler beim Beenden: {str(e)}"})
